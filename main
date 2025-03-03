@@ -1,0 +1,88 @@
+//@version=5
+strategy("AI-Optimized Trading Strategy", overlay=true, default_qty_type=strategy.percent_of_equity, default_qty_value=2)
+
+// 🔹 AI-Optimized Inputs
+emaShortLen  = input(10, "Short EMA Length")
+emaLongLen   = input(50, "Long EMA Length")
+adxThreshold = input(20, "ADX Threshold")
+riskPercent  = input(2, "Risk %")
+atrMultiplier = input(2.0, "ATR Multiplier")
+breakoutStrength = input(1.5, "Breakout Strength")
+tpMultiplier = input(3.0, "Take Profit Multiplier") // ✅ New Take Profit Multiplier
+
+// 🔹 Fetch Real OHLC Values for Accuracy
+realClose = request.security(syminfo.tickerid, "1", close)
+realHigh = request.security(syminfo.tickerid, "1", high)
+realLow = request.security(syminfo.tickerid, "1", low)
+realOpen = request.security(syminfo.tickerid, "1", open)
+
+// 🔹 Indicators
+emaShort = ta.ema(realClose, emaShortLen)
+emaLong  = ta.ema(realClose, emaLongLen)
+vwap = ta.vwap(realClose)
+atr = ta.atr(14)
+volatility = atr * atrMultiplier
+[macdLine, signalLine, _] = ta.macd(realClose, 12, 26, 9)
+
+// 🔹 ADX Calculation
+adxLen = 14
+upMove = realHigh - ta.highest(realHigh[1], 1)
+downMove = ta.lowest(realLow[1], 1) - realLow
+plusDM = upMove > downMove and upMove > 0 ? upMove : 0
+minusDM = downMove > upMove and downMove > 0 ? downMove : 0
+tr = ta.atr(adxLen)
+plusDI = 100 * ta.rma(plusDM, adxLen) / tr
+minusDI = 100 * ta.rma(minusDM, adxLen) / tr
+dx = 100 * math.abs(plusDI - minusDI) / (plusDI + minusDI)
+adx = ta.rma(dx, adxLen)
+
+// 🔥 AI Trend Detection
+bullishTrend = emaShort > emaLong and macdLine > signalLine and adx > adxThreshold and realClose > vwap
+bearishTrend = emaShort < emaLong and macdLine < signalLine and adx > adxThreshold and realClose < vwap
+
+// 🔥 AI Breakout Detection
+highPivot = ta.pivothigh(realHigh, 10, 10)
+lowPivot = ta.pivotlow(realLow, 10, 10)
+highBreakout = ta.crossover(realClose, highPivot) and realClose > highPivot * breakoutStrength
+lowBreakout = ta.crossunder(realClose, lowPivot) and realClose < lowPivot * breakoutStrength
+
+// **Stop Loss Calculation (Dynamic)**
+stopLossLong = realLow - volatility
+stopLossShort = realHigh + volatility
+
+// **Take Profit Calculation (Dynamic)**
+takeProfitLong = realClose + (volatility * tpMultiplier) // ✅ Added Take Profit for Long
+takeProfitShort = realClose - (volatility * tpMultiplier) // ✅ Added Take Profit for Short
+
+// **Auto Position Sizing**
+equity = strategy.equity
+riskAmount = equity * (riskPercent / 100)
+positionSizeLong = riskAmount / math.abs(stopLossLong - realClose)
+positionSizeShort = riskAmount / math.abs(stopLossShort - realClose)
+
+// 🚀 **Trade Execution**
+if bullishTrend or highBreakout
+    strategy.entry("Long", strategy.long, qty=positionSizeLong)
+    strategy.exit("SL Long", from_entry="Long", stop=stopLossLong, limit=takeProfitLong) // ✅ Take Profit Added
+
+if bearishTrend or lowBreakout
+    strategy.entry("Short", strategy.short, qty=positionSizeShort)
+    strategy.exit("SL Short", from_entry="Short", stop=stopLossShort, limit=takeProfitShort) // ✅ Take Profit Added
+
+// 🔔 Alerts
+alertcondition(bullishTrend, title="🚀 AI Bullish Trend", message="Strong Uptrend Signal!")
+alertcondition(bearishTrend, title="⚠️ AI Bearish Trend", message="Strong Downtrend Signal!")
+alertcondition(highBreakout, title="🚀 Breakout Alert (BUY)", message="Bullish breakout detected!")
+alertcondition(lowBreakout, title="⚠️ Breakdown Alert (SELL)", message="Bearish breakout detected!")
+
+// 📌 Plot Indicators
+plot(emaShort, color=color.blue, title="Short EMA", linewidth=2)
+plot(emaLong, color=color.red, title="Long EMA", linewidth=2)
+plot(vwap, color=color.green, title="VWAP", linewidth=2)
+plot(highPivot, color=color.green, title="Resistance", style=plot.style_cross, linewidth=3)
+plot(lowPivot, color=color.red, title="Support", style=plot.style_cross, linewidth=3)
+plot(adx, color=color.orange, title="ADX", linewidth=2)
+
+// 📌 Buy & Sell Signals
+plotshape(series=bullishTrend or highBreakout, location=location.belowbar, color=color.green, style=shape.labelup, title="BUY Signal")
+plotshape(series=bearishTrend or lowBreakout, location=location.abovebar, color=color.red, style=shape.labeldown, title="SELL Signal")
